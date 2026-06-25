@@ -1,0 +1,5 @@
+# cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# set subscription_id, fhir_service_url, fhir_service_resource_id
+subscription_id = "2c2a512d-74b0-4d00-9cb1-4a5a1996b02d"
+fhir_service_url = "https://viuahdsws01-viuahdsws01.fhir.azurehealthcareapis.com"
+fhir_service_resource_id = "/subscriptions/2c2a512d-74b0-4d00-9cb1-4a5a1996b02d/resourceGroups/viuhealth01/providers/Microsoft.HealthcareApis/workspaces/viuahdsws01/fhirservices/viuahdsws01"
