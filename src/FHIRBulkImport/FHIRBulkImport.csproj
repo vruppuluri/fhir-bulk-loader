@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+      net8.0: Azure Functions v4 supports net6, net7, net8.
+      net8.0 is the current LTS and is compatible with both .NET 8 and .NET 9 SDKs.
+      Do NOT use net9.0 — Azure Functions v4 isolated/in-process workers do not yet
+      have a stable net9.0 target in the Microsoft.NET.Sdk.Functions package.
+    -->
+    <TargetFramework>net8.0</TargetFramework>
+    <AzureFunctionsVersion>v4</AzureFunctionsVersion>
+    <RootNamespace>FHIRBulkImport</RootNamespace>
+    <AssemblyName>FHIRBulkImport</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Treat vulnerability warnings as warnings, not errors, so CI doesn't break
+         on transitive advisories we cannot control. Pin the direct package instead. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <!--
+      Version notes:
+      - Azure.Identity 1.13.1: fixes GHSA-m5vv-6r4h-3vj9 & GHSA-wvxc-855f-jvrv,
+        and satisfies the >=1.11.0 transitive requirement from
+        Microsoft.Extensions.Azure 1.7.3 (pulled by WebJobs.Extensions.EventGrid 3.3.1).
+      - Microsoft.Identity.Client 4.65.0: fixes GHSA-m5vv / GHSA-x674 advisories.
+      - All other packages bumped to latest stable that supports net8.0.
+    -->
+    <PackageReference Include="Microsoft.NET.Sdk.Functions"                      Version="4.4.0" />
+    <PackageReference Include="Azure.Storage.Blobs"                              Version="12.22.2" />
+    <PackageReference Include="Azure.Storage.Queues"                             Version="12.20.0" />
+    <PackageReference Include="Azure.Identity"                                   Version="1.13.1" />
+    <!--
+      Do NOT pin Microsoft.Identity.Client here.
+      Azure.Identity 1.13.1 requires MSAL >= 4.66.1 as a transitive dependency.
+      Pinning an older version causes NU1605 "package downgrade" build errors.
+      Let NuGet resolve the correct version automatically via Azure.Identity.
+    -->
+    <PackageReference Include="Microsoft.Azure.WebJobs.Extensions.EventGrid"     Version="3.4.2" />
+    <PackageReference Include="Microsoft.Azure.WebJobs.Extensions.DurableTask"   Version="2.13.6" />
+    <PackageReference Include="Microsoft.Azure.WebJobs.Extensions.Storage"       Version="5.3.3" />
+    <PackageReference Include="Newtonsoft.Json"                                  Version="13.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging"                     Version="8.0.0" />
+    <PackageReference Include="Polly"                                             Version="8.4.2" />
+    <PackageReference Include="Microsoft.ApplicationInsights.WorkerService"      Version="2.22.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="host.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="local.settings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+</Project>

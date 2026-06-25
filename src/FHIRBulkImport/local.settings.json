@@ -1,0 +1,17 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet",
+    "FBI-STORAGEACCT": "UseDevelopmentStorage=true",
+    "FS-URL": "https://<workspace>-<fhirservice>.fhir.azurehealthcareapis.com",
+    "FS-TENANT-NAME": "<your-tenant-id>",
+    "FS-CLIENT-ID": "<your-client-id>",
+    "FS-SECRET": "<your-client-secret>",
+    "FS-RESOURCE": "https://<workspace>-<fhirservice>.fhir.azurehealthcareapis.com",
+    "FBI-MAXRETRIES": "3",
+    "FBI-THROTTLE-DELAY": "500",
+    "FBI-MAXBUNDLESIZE": "500",
+    "FBI-PARALLELPATIENTS": "10"
+  }
+}

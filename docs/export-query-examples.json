@@ -1,0 +1,42 @@
+[
+  {
+    "description": "CMS Payor exchange — subscribers of a specific coverage class",
+    "query": {
+      "query": "Coverage?class-value=Med1&_count=50",
+      "patientReferenceField": "subscriber",
+      "include": [
+        "Patient?_id=$IDS&_count=50",
+        "Coverage?patient=$IDS&_count=50",
+        "ExplanationOfBenefit?patient=$IDS&_count=50",
+        "Condition?patient=$IDS&_count=50",
+        "Observation?patient=$IDS&_count=50",
+        "AllergyIntolerance?patient=$IDS&_count=50",
+        "Encounter?patient=$IDS&_count=50"
+      ]
+    }
+  },
+  {
+    "description": "Provider wellness campaign — patients born before 1951",
+    "query": {
+      "query": "Patient?birthdate=lt1951-01-01&_count=50",
+      "patientReferenceField": "id",
+      "include": [
+        "Encounter?patient=$IDS&_count=50",
+        "Patient?_id=$IDS&_count=50"
+      ]
+    }
+  },
+  {
+    "description": "Chronic condition cohort — patients with diabetes diagnoses",
+    "query": {
+      "query": "Condition?code=73211009&_count=50",
+      "patientReferenceField": "subject",
+      "include": [
+        "Patient?_id=$IDS&_count=50",
+        "Condition?patient=$IDS&_count=50",
+        "MedicationRequest?patient=$IDS&_count=50",
+        "Observation?patient=$IDS&category=laboratory&_count=50"
+      ]
+    }
+  }
+]

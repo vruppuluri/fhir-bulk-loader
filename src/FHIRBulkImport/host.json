@@ -1,0 +1,31 @@
+{
+  "version": "2.0",
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "excludedTypes": "Request"
+      }
+    },
+    "logLevel": {
+      "default": "Information",
+      "FHIRBulkImport": "Information"
+    }
+  },
+  "functionTimeout": "00:10:00",
+  "extensions": {
+    "eventGrid": {
+      "maxConcurrentCalls": 20
+    },
+    "durableTask": {
+      "maxConcurrentActivityFunctions": 20,
+      "maxConcurrentOrchestratorFunctions": 10
+    },
+    "queues": {
+      "batchSize": 16,
+      "newBatchThreshold": 8,
+      "visibilityTimeout": "00:01:00",
+      "maxDequeueCount": 5
+    }
+  }
+}
