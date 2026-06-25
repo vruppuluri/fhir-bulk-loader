@@ -118,8 +118,8 @@ fhir_service_resource_id = "/subscriptions/.../fhirservices/<svc>"
 cd terraform
 az login
 terraform init
-terraform plan   # review changes
-terraform apply
+terraform plan -out=plan1  # review changes
+terraform apply plan1
 ```
 
 Terraform outputs the Function App name, storage account, and the export endpoint.
