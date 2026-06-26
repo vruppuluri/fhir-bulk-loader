@@ -1,14 +1,26 @@
 ###############################################################################
 # FHIR Bulk Loader & Export — Terraform (azurerm ~> 3.x)
-# Deploys the Function App and supporting infra alongside your existing
-# FHIR Service and Storage Account.
+# Phase 1: All infrastructure EXCEPT Event Grid subscriptions.
+# Event Grid subscriptions live in eventgrid.tf and are gated behind the
+# null_resource that deploys the Function App package (so EG webhook
+# handshake finds live endpoints, not 404s).
 ###############################################################################
 
 terraform {
   required_version = ">= 1.5.0"
   required_providers {
-    azurerm = { source = "hashicorp/azurerm", version = "~> 3.100" }
-    random  = { source = "hashicorp/random",  version = "~> 3.6" }
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.100"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
+    }
   }
 }
 
@@ -31,13 +43,17 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  suffix      = random_string.suffix.result
-  base        = "${var.project_name}-${var.environment}"
-  sa_name     = replace(lower("${var.project_name}${var.environment}${local.suffix}"), "-", "")
-  kv_name     = "${local.base}-kv-${local.suffix}"
-  func_name   = "${local.base}-fn-${local.suffix}"
-  rg_name     = var.resource_group_name != "" ? var.resource_group_name : "${local.base}-rg"
-  tags = merge(var.tags, { Environment = var.environment, Project = var.project_name, ManagedBy = "Terraform" })
+  suffix    = random_string.suffix.result
+  base      = "${var.project_name}-${var.environment}"
+  sa_name   = replace(lower("${var.project_name}${var.environment}${local.suffix}"), "-", "")
+  kv_name   = "${local.base}-kv-${local.suffix}"
+  func_name = "${local.base}-fn-${local.suffix}"
+  rg_name   = var.resource_group_name != "" ? var.resource_group_name : "${local.base}-rg"
+  tags = merge(var.tags, {
+    Environment = var.environment
+    Project     = var.project_name
+    ManagedBy   = "Terraform"
+  })
 }
 
 ###############################################################################
@@ -51,7 +67,7 @@ resource "azurerm_resource_group" "main" {
 }
 
 ###############################################################################
-# Storage Account (loader-specific — separate from your FHIR storage)
+# Storage Account
 ###############################################################################
 
 resource "azurerm_storage_account" "loader" {
@@ -61,11 +77,17 @@ resource "azurerm_storage_account" "loader" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
+
   blob_properties {
     versioning_enabled = true
-    delete_retention_policy            { days = 7 }
-    container_delete_retention_policy  { days = 7 }
+    delete_retention_policy {
+      days = 7
+    }
+    container_delete_retention_policy {
+      days = 7
+    }
   }
+
   tags = local.tags
 }
 
@@ -76,7 +98,7 @@ resource "azurerm_storage_container" "containers" {
   container_access_type = "private"
 }
 
-resource "azurerm_storage_queue" "retry"  {
+resource "azurerm_storage_queue" "retry" {
   name                 = "fhir-retry-queue"
   storage_account_name = azurerm_storage_account.loader.name
 }
@@ -87,7 +109,7 @@ resource "azurerm_storage_queue" "poison" {
 }
 
 ###############################################################################
-# Key Vault — stores FHIR credentials; Function App reads via KV reference
+# Key Vault
 ###############################################################################
 
 resource "azurerm_key_vault" "main" {
@@ -99,12 +121,12 @@ resource "azurerm_key_vault" "main" {
   purge_protection_enabled   = false
   soft_delete_retention_days = 7
 
-  # Deployer access
   access_policy {
     tenant_id          = data.azurerm_client_config.current.tenant_id
     object_id          = data.azurerm_client_config.current.object_id
     secret_permissions = ["Get", "List", "Set", "Delete", "Purge", "Recover"]
   }
+
   tags = local.tags
 }
 
@@ -150,7 +172,7 @@ resource "azurerm_application_insights" "main" {
 }
 
 ###############################################################################
-# App Service Plan + Function App
+# App Service Plan
 ###############################################################################
 
 resource "azurerm_service_plan" "main" {
@@ -162,6 +184,10 @@ resource "azurerm_service_plan" "main" {
   tags                = local.tags
 }
 
+###############################################################################
+# Function App
+###############################################################################
+
 resource "azurerm_windows_function_app" "loader" {
   name                       = local.func_name
   resource_group_name        = azurerm_resource_group.main.name
@@ -170,7 +196,9 @@ resource "azurerm_windows_function_app" "loader" {
   storage_account_name       = azurerm_storage_account.loader.name
   storage_account_access_key = azurerm_storage_account.loader.primary_access_key
 
-  identity { type = "SystemAssigned" }
+  identity {
+    type = "SystemAssigned"
+  }
 
   app_settings = {
     FUNCTIONS_WORKER_RUNTIME              = "dotnet"
@@ -179,17 +207,13 @@ resource "azurerm_windows_function_app" "loader" {
     APPINSIGHTS_INSTRUMENTATIONKEY        = azurerm_application_insights.main.instrumentation_key
     APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.main.connection_string
 
-    # FHIR connection (Key Vault references — resolved at runtime)
-    "FS-URL"      = "@Microsoft.KeyVault(VaultName=${local.kv_name};SecretName=FhirServiceUrl)"
+    "FS-URL"         = "@Microsoft.KeyVault(VaultName=${local.kv_name};SecretName=FhirServiceUrl)"
     "FS-TENANT-NAME" = var.fhir_tenant_id != "" ? var.fhir_tenant_id : data.azurerm_client_config.current.tenant_id
     "FS-CLIENT-ID"   = var.fhir_client_id
     "FS-SECRET"      = var.fhir_client_secret != "" ? "@Microsoft.KeyVault(VaultName=${local.kv_name};SecretName=FhirClientSecret)" : ""
     "FS-RESOURCE"    = var.fhir_resource != "" ? var.fhir_resource : var.fhir_service_url
 
-    # Loader storage (Key Vault reference)
-    "FBI-STORAGEACCT" = "@Microsoft.KeyVault(VaultName=${local.kv_name};SecretName=StorageConnectionString)"
-
-    # Tuning knobs
+    "FBI-STORAGEACCT"     = "@Microsoft.KeyVault(VaultName=${local.kv_name};SecretName=StorageConnectionString)"
     "FBI-MAXRETRIES"       = tostring(var.max_retries)
     "FBI-THROTTLE-DELAY"   = tostring(var.throttle_delay_ms)
     "FBI-MAXBUNDLESIZE"    = tostring(var.max_bundle_size)
@@ -200,14 +224,18 @@ resource "azurerm_windows_function_app" "loader" {
 
   site_config {
     always_on = true
-    application_stack { dotnet_version = "v6.0" }
-    cors { allowed_origins = ["https://portal.azure.com"] }
+    application_stack {
+      dotnet_version              = "v8.0"
+      use_dotnet_isolated_runtime = false
+    }
+    cors {
+      allowed_origins = ["https://portal.azure.com"]
+    }
   }
 
   tags = local.tags
 }
 
-# Grant Function App managed identity read access to Key Vault
 resource "azurerm_key_vault_access_policy" "func" {
   key_vault_id       = azurerm_key_vault.main.id
   tenant_id          = azurerm_windows_function_app.loader.identity[0].tenant_id
@@ -231,7 +259,6 @@ resource "azurerm_role_assignment" "queue_contrib" {
   principal_id         = azurerm_windows_function_app.loader.identity[0].principal_id
 }
 
-# Assign FHIR Data Contributor on the existing FHIR service (if ARM resource ID supplied)
 resource "azurerm_role_assignment" "fhir_contrib" {
   count                = var.fhir_service_resource_id != "" ? 1 : 0
   scope                = var.fhir_service_resource_id
@@ -240,7 +267,59 @@ resource "azurerm_role_assignment" "fhir_contrib" {
 }
 
 ###############################################################################
-# Event Grid System Topic on loader storage
+# Function App package deployment
+# Builds, publishes, zips and deploys the .NET project BEFORE Event Grid
+# subscriptions are created — Event Grid performs a live webhook handshake
+# and will fail with 404 if the functions aren't yet deployed.
+###############################################################################
+
+resource "null_resource" "deploy_package" {
+  # Re-run whenever the Function App is recreated or source changes
+  triggers = {
+    function_app_id  = azurerm_windows_function_app.loader.id
+    source_hash      = var.source_code_hash
+  }
+
+  provisioner "local-exec" {
+    working_dir = "${path.module}/.."
+    command     = <<-CMD
+      set -e
+      echo "==> Building Function App..."
+      dotnet publish src/FHIRBulkImport/FHIRBulkImport.csproj \
+        --configuration Release \
+        --output /tmp/fhir-loader-publish \
+        --nologo \
+        -p:GenerateRuntimeConfigurationFiles=true
+
+      echo "==> Creating zip package..."
+      rm -f /tmp/fhir-loader-package.zip
+      cd /tmp/fhir-loader-publish && zip -r /tmp/fhir-loader-package.zip . && cd -
+
+      echo "==> Deploying to Function App ${azurerm_windows_function_app.loader.name}..."
+      az functionapp deployment source config-zip \
+        --resource-group ${azurerm_resource_group.main.name} \
+        --name ${azurerm_windows_function_app.loader.name} \
+        --src /tmp/fhir-loader-package.zip \
+        --output none
+
+      echo "==> Waiting 60 seconds for Function App to initialise endpoints..."
+      sleep 60
+
+      echo "==> Package deployment complete."
+    CMD
+    interpreter = ["/bin/bash", "-c"]
+  }
+
+  depends_on = [
+    azurerm_windows_function_app.loader,
+    azurerm_key_vault_access_policy.func,
+    azurerm_key_vault_secret.fhir_url,
+    azurerm_key_vault_secret.storage_conn,
+  ]
+}
+
+###############################################################################
+# Event Grid System Topic
 ###############################################################################
 
 resource "azurerm_eventgrid_system_topic" "storage" {
@@ -252,33 +331,6 @@ resource "azurerm_eventgrid_system_topic" "storage" {
   tags                   = local.tags
 }
 
-locals {
-  eg_subscriptions = {
-    bundles = { prefix = "/blobServices/default/containers/bundles/", fn = "ImportBundleEventGrid" }
-    ndjson  = { prefix = "/blobServices/default/containers/ndjson/",  fn = "ImportNDJSONEventGrid" }
-    zip     = { prefix = "/blobServices/default/containers/zip/",     fn = "ImportZIPEventGrid"    }
-  }
-}
-
-resource "azurerm_eventgrid_system_topic_event_subscription" "ingest" {
-  for_each            = local.eg_subscriptions
-  name                = "fhir-${each.key}-sub"
-  system_topic        = azurerm_eventgrid_system_topic.storage.name
-  resource_group_name = azurerm_resource_group.main.name
-
-  azure_function_endpoint {
-    function_id                       = "${azurerm_windows_function_app.loader.id}/functions/${each.value.fn}"
-    max_events_per_batch              = var.eg_max_events_per_batch
-    preferred_batch_size_in_kilobytes = var.eg_preferred_batch_size_kb
-  }
-
-  included_event_types = ["Microsoft.Storage.BlobCreated"]
-  subject_filter       { subject_begins_with = each.value.prefix }
-  retry_policy         { max_delivery_attempts = 30; event_time_to_live = 1440 }
-
-  depends_on = [azurerm_windows_function_app.loader]
-}
-
 ###############################################################################
 # Diagnostics
 ###############################################################################
@@ -287,18 +339,38 @@ resource "azurerm_monitor_diagnostic_setting" "func" {
   name                       = "func-diag"
   target_resource_id         = azurerm_windows_function_app.loader.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
-  enabled_log { category = "FunctionAppLogs" }
-  metric { category = "AllMetrics"; enabled = true }
+
+  enabled_log {
+    category = "FunctionAppLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+    enabled  = true
+  }
 }
 
 resource "azurerm_monitor_diagnostic_setting" "blob" {
   name                       = "blob-diag"
   target_resource_id         = "${azurerm_storage_account.loader.id}/blobServices/default"
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
-  enabled_log { category = "StorageRead" }
-  enabled_log { category = "StorageWrite" }
-  enabled_log { category = "StorageDelete" }
-  metric { category = "Transaction"; enabled = true }
+
+  enabled_log {
+    category = "StorageRead"
+  }
+
+  enabled_log {
+    category = "StorageWrite"
+  }
+
+  enabled_log {
+    category = "StorageDelete"
+  }
+
+  metric {
+    category = "Transaction"
+    enabled  = true
+  }
 }
 
 ###############################################################################
@@ -310,6 +382,7 @@ resource "azurerm_monitor_action_group" "alerts" {
   name                = "${local.base}-ag"
   resource_group_name = azurerm_resource_group.main.name
   short_name          = "fhiralerts"
+
   email_receiver {
     name                    = "ops"
     email_address           = var.alert_email
@@ -323,7 +396,10 @@ resource "azurerm_monitor_metric_alert" "errors" {
   resource_group_name = azurerm_resource_group.main.name
   scopes              = [azurerm_windows_function_app.loader.id]
   description         = "High error rate on FHIR Bulk Loader"
-  severity            = 2; frequency = "PT5M"; window_size = "PT15M"
+  severity            = 2
+  frequency           = "PT5M"
+  window_size         = "PT15M"
+
   criteria {
     metric_namespace = "Microsoft.Web/sites"
     metric_name      = "Http5xx"
@@ -331,5 +407,8 @@ resource "azurerm_monitor_metric_alert" "errors" {
     operator         = "GreaterThan"
     threshold        = 10
   }
-  action { action_group_id = azurerm_monitor_action_group.alerts[0].id }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alerts[0].id
+  }
 }
